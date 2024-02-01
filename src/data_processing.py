@@ -168,7 +168,7 @@ class DataProcessor:
         logging.info(f'Processed data saved to {out_filepath}')
         return processed_df, pivot
 
-    def plot_numpy_data(self, idx):
+    def plot_numpy_data(self, idx, savefig=True):
         filename = self.files_dict[idx]['out']
         data = np.load(filename)
         keys = ['X', 'Y', 'Z', 'intensity', 'angle', 'quality', 'rejected', 'roll', 'pitch', 'heading']
@@ -177,12 +177,13 @@ class DataProcessor:
             a = axes[i//5, i%5]
             fig.colorbar(a.imshow(data[key]), ax=a)
             a.set_title(key)
-        fig.tight_layout()
-        fig.savefig(os.path.join(self.out_folder, f'{filename}.png'),
-                                 dpi=150, bbox_inches='tight')
-        plt.close(fig)
+        if savefig:
+            fig.tight_layout()
+            fig.savefig(os.path.join(self.out_folder, f'{filename}.png'),
+                                    dpi=150, bbox_inches='tight')
+            plt.close(fig)
 
-    def plot_not_rejected_data(self, idx):
+    def plot_not_rejected_data(self, idx, savefig=True):
         filename = self.files_dict[idx]['out']
         data = np.load(filename)
         rejected = data['rejected']
@@ -191,9 +192,10 @@ class DataProcessor:
         plt.imshow(intensity)
         plt.colorbar()
         plt.title('Intensity with rejected beams set to 0')
-        plt.savefig(os.path.join(self.out_folder, f'{filename}-not-rejected.png'),
-                                 dpi=150, bbox_inches='tight')
-        plt.close()
+        if savefig:
+            plt.savefig(os.path.join(self.out_folder, f'{filename}-not-rejected.png'),
+                                    dpi=150, bbox_inches='tight')
+            plt.close()
 
 
     def process_folder(self, plot=True, plot_not_rejected=True):
