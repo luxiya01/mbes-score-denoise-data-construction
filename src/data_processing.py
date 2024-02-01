@@ -168,13 +168,14 @@ class DataProcessor:
         logging.info(f'Processed data saved to {out_filepath}')
         return processed_df, pivot
 
-    def plot_numpy_data(self, idx, savefig=True):
+    def plot_numpy_data(self, idx, savefig=True, 
+                        keys=['X', 'Y', 'Z', 'intensity', 'angle', 'quality', 'rejected', 'roll', 'pitch', 'heading']):
         filename = self.files_dict[idx]['out']
         data = np.load(filename)
-        keys = ['X', 'Y', 'Z', 'intensity', 'angle', 'quality', 'rejected', 'roll', 'pitch', 'heading']
-        fig, axes = plt.subplots(2, 5, figsize=(15, 15))
+        num_columns = (len(keys)+1)//2
+        fig, axes = plt.subplots(2, num_columns, figsize=(num_columns*3, num_columns*3))
         for i, key in enumerate(keys):
-            a = axes[i//5, i%5]
+            a = axes[i//num_columns, i%num_columns]
             fig.colorbar(a.imshow(data[key]), ax=a)
             a.set_title(key)
         if savefig:
