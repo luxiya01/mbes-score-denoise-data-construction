@@ -7,6 +7,9 @@ import os
 import matplotlib.pyplot as plt
 
 class DataProcessor:
+    """
+    Class to process the raw data .xyz and .xyzi files exported from NaviEdit into numpy arrays
+    """
     def __init__(self, folder) -> None:
         self.folder = folder
         self._setup_subfolders()
