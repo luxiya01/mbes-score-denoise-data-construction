@@ -154,20 +154,21 @@ class DataProcessor:
                                        'Roll', 'Pitch', 'Heading', 'Heave',
                                        'datetime'
                                   ])
-        np.savez(out_filepath,
-                 X=pivot['X'].to_numpy().astype(np.float32),
-                 Y=pivot['Y'].to_numpy().astype(np.float32),
-                 Z=pivot['Z'].to_numpy().astype(np.float32),
-                 intensity=pivot['intensity'].to_numpy().astype(np.int),
-                 angle=pivot['angle'].to_numpy().astype(np.float32),
-                 quality=pivot['quality'].to_numpy().astype(np.int),
-                 rejected=pivot['rejected'].to_numpy().astype(np.bool),
-                 roll=pivot['Roll'].to_numpy().astype(np.float32),
-                 pitch=pivot['Pitch'].to_numpy().astype(np.float32),
-                 heading=pivot['Heading'].to_numpy().astype(np.float32),
-                 heave=pivot['Heave'].to_numpy().astype(np.float32),
-                 datetime=pivot['datetime'].to_numpy().astype(np.datetime64),
-                 )
+        data = {
+            'X': pivot['X'].to_numpy().astype(np.float32),
+            'Y': pivot['Y'].to_numpy().astype(np.float32),
+            'Z': pivot['Z'].to_numpy().astype(np.float32),
+            'intensity': pivot['intensity'].to_numpy().astype(np.int),
+            'angle': pivot['angle'].to_numpy().astype(np.float32),
+            'quality': pivot['quality'].to_numpy().astype(np.int),
+            'rejected': pivot['rejected'].to_numpy().astype(np.bool),
+            'roll': pivot['Roll'].to_numpy().astype(np.float32),
+            'pitch': pivot['Pitch'].to_numpy().astype(np.float32),
+            'heading': pivot['Heading'].to_numpy().astype(np.float32),
+            'heave': pivot['Heave'].to_numpy().astype(np.float32),
+            'datetime': pivot['datetime'].to_numpy().astype(np.datetime64),
+        }
+        np.savez(out_filepath, **data)
         logging.info(f'Processed data saved to {out_filepath}')
         return processed_df, pivot
 
