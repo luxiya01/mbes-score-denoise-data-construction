@@ -192,49 +192,42 @@ class DataProcessor:
             'heave': pivot['Heave'].to_numpy().astype(np.float32),
             'datetime': pivot['datetime'].to_numpy().astype(np.datetime64),
         }
+        data['X_interp'] = interpolate_array(data['X'], data['rejected'])
+        data['Y_interp'] = interpolate_array(data['Y'], data['rejected'])
+        data['Z_interp'] = interpolate_array(data['Z'], data['rejected'])
         np.savez(out_filepath, **data)
         logging.info(f'Processed data saved to {out_filepath}')
         return processed_df, pivot
 
-    def plot_numpy_data(self, idx, savefig=True, 
+    def plot_numpy_data(self, idx, savefig=True, suffix='', num_rows=2, filter_rejected=False,
                         keys=['X', 'Y', 'Z', 'intensity', 'angle', 'quality', 'rejected', 'roll', 'pitch', 'heading']):
         filename = self.files_dict[idx]['out']
         data = np.load(filename)
-        num_columns = (len(keys)+1)//2
-        fig, axes = plt.subplots(2, num_columns, figsize=(num_columns*3, num_columns*3))
+        num_columns = (len(keys)+1)//num_rows
+        fig, axes = plt.subplots(num_rows, num_columns, figsize=(num_columns*3, num_columns*3))
         for i, key in enumerate(keys):
             a = axes[i//num_columns, i%num_columns]
-            fig.colorbar(a.imshow(data[key]), ax=a)
+            im = data[key]
+            if filter_rejected:
+                im[data['rejected']] = np.nan
+            fig.colorbar(a.imshow(im), ax=a)
             a.set_title(key)
         if savefig:
             fig.tight_layout()
-            fig.savefig(os.path.join(self.out_folder, f'{filename}.png'),
+            figname = f'{filename}{suffix}-filtered.png' if filter_rejected else f'{filename}{suffix}.png'
+            fig.savefig(os.path.join(self.out_folder, figname),
                                     dpi=150, bbox_inches='tight')
             plt.close(fig)
 
-    def plot_not_rejected_data(self, idx, savefig=True):
-        filename = self.files_dict[idx]['out']
-        data = np.load(filename)
-        rejected = data['rejected']
-        intensity = data['intensity']
-        intensity[rejected] = 0
-        plt.imshow(intensity)
-        plt.colorbar()
-        plt.title('Intensity with rejected beams set to 0')
-        if savefig:
-            plt.savefig(os.path.join(self.out_folder, f'{filename}-not-rejected.png'),
-                                    dpi=150, bbox_inches='tight')
-            plt.close()
-
-
-    def process_folder(self, plot=True, plot_not_rejected=True):
+    def process_folder(self, plot=True):
         for idx in tqdm(self.files_dict.keys()):
             try:
                 logging.info(f'Processing idx={idx}...')
                 self.process_data_to_numpy(idx)
                 if plot:
                     self.plot_numpy_data(idx)
-                if plot_not_rejected:
-                    self.plot_not_rejected_data(idx)
+                    self.plot_numpy_data(idx, filter_rejected=True)
+                    self.plot_numpy_data(idx, suffix='-interp', keys=['X_interp', 'Y_interp', 'Z_interp'],
+                                         num_rows=1, filter_rejected=False)
             except Exception as e:
                 logging.error(f'Error processing file idx={idx}: {e}')
