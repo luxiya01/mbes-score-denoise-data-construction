@@ -108,7 +108,7 @@ class DataProcessor:
     def _parse_intensity(self, idx):
         filename = self.files_dict[idx]['intensity']
         intensity_list = []
-        with open(os.path.join(self.intensity_folder, filename)) as f:
+        with open(filename) as f:
             for line in f:
                 intensity_list.append(int(line.split(' ')[-1]))
         return intensity_list
@@ -116,7 +116,7 @@ class DataProcessor:
     def _parse_cleaned(self, idx):
         filename = self.files_dict[idx]['cleaned']
 
-        cleaned_df = pd.read_csv(os.path.join(self.cleaned_folder, filename),
+        cleaned_df = pd.read_csv(filename,
                          header=None, sep=' ',
                          names=['X', 'Y', 'Z', 'rejection_flag'])
         cleaned_df['rejected'] = cleaned_df['rejection_flag'] == 'R'
@@ -126,8 +126,7 @@ class DataProcessor:
     
     def _parse_raw_pings(self, idx):
         filename = self.files_dict[idx]['pings']
-        df = pd.read_csv(os.path.join(self.pings_folder, filename),
-                         sep='\t')
+        df = pd.read_csv(filename, sep='\t')
         # set scan_no to start from 0 and cumulate per ping
         df['scan_no'] = (df['Ping No'] != df['Ping No'].shift(1)).cumsum() - 1
         df['beam_id'] = df['Beam No']
@@ -146,6 +145,15 @@ class DataProcessor:
         return angle_quality_df
 
     def get_processed_data_df(self, idx):
+        """
+        Get the processed data dataframe for a given index.
+
+        Parameters:
+        - idx (int): The index of the data.
+
+        Returns:
+        - processed_df (pandas.DataFrame): The processed data dataframe.
+        """
         pings_df = self._parse_raw_pings(idx)
         cleaned_df = self._parse_cleaned(idx)
         angle_quality_df = self.get_angle_quality_and_intensity_df(idx)
@@ -153,13 +161,12 @@ class DataProcessor:
         # Merge the three dataframes based on XYZ
         processed_df = pd.merge(pings_df, angle_quality_df, on=['scan_no', 'beam_id', 'X', 'Y', 'Z'], how='outer')
         processed_df = pd.merge(processed_df, cleaned_df, on=['X', 'Y', 'Z'], how='outer')
-        
+
         # Drop any duplicated rows
-        processed_df.drop_duplicates(subset=['Ping No', 'Beam No', 'X', 'Y', 'Z'], inplace=True, keep='first')
+        processed_df.drop_duplicates(subset=['Ping No', 'Beam No', 'X', 'Y', 'Z'], inplace=True)
         # Drop any rows with NaN values in Ping No and Beam No
         processed_df.dropna(subset=['Ping No', 'Beam No'], inplace=True)
 
-        
         logging.info(f'Processed data shape: {processed_df.shape}')
         return processed_df
     
