@@ -34,13 +34,24 @@ class DataProcessor:
     """
     Class to process the raw data .xyz and .xyzi files exported from NaviEdit into numpy arrays
     """
-    def __init__(self, folder) -> None:
+    def __init__(self, folder, logger=None) -> None:
+        self.logger = self.setup_logger(logger)
         self.folder = folder
         self._setup_subfolders()
         self.files_dict = self._get_files_dict()
 
     def __len__(self):
         return len(self.files_dict)
+
+    def setup_logger(self, logger):
+        if logger is None:
+            logger = logging.getLogger(__name__)
+            logger.setLevel(logging.INFO)
+            formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+            ch = logging.StreamHandler()
+            ch.setFormatter(formatter)
+            logger.addHandler(ch)
+        return logger
 
     def _setup_subfolders(self):
         self.pings_folder = os.path.join(self.folder, 'pings-xyz')
@@ -121,7 +132,7 @@ class DataProcessor:
                          names=['X', 'Y', 'Z', 'rejection_flag'])
         cleaned_df['rejected'] = cleaned_df['rejection_flag'] == 'R'
         cleaned_df['rejected'].fillna(False, inplace=True)
-        logging.info(f'Cleaned data shape: {cleaned_df.shape}')
+        self.logger.info(f'Cleaned data shape: {cleaned_df.shape}')
         return cleaned_df[['X', 'Y', 'Z', 'rejected']]
     
     def _parse_raw_pings(self, idx):
@@ -134,14 +145,14 @@ class DataProcessor:
         # convert time info to datetime column
         df['datetime'] = pd.to_datetime(df['yyyy'].astype(str) + df['mmddhhmm'].astype(str) 
                                             + df['ss.ss'].astype(str), format='%Y%m%d%H%M%S.%f')
-        logging.info(f'Raw pings shape: {df.shape}')
+        self.logger.info(f'Raw pings shape: {df.shape}')
         return df
         
     def get_angle_quality_and_intensity_df(self, idx):
         angle_quality_df = self._parse_angle_quality(idx)
         intensity_list = self._parse_intensity(idx)
         angle_quality_df['intensity'] = intensity_list
-        logging.info(f'Angle quality and intensity shape: {angle_quality_df.shape}')
+        self.logger.info(f'Angle quality and intensity shape: {angle_quality_df.shape}')
         return angle_quality_df
 
     def get_processed_data_df(self, idx):
@@ -167,14 +178,14 @@ class DataProcessor:
         # Drop any rows with NaN values in Ping No and Beam No
         processed_df.dropna(subset=['Ping No', 'Beam No'], inplace=True)
 
-        logging.info(f'Processed data shape: {processed_df.shape}')
+        self.logger.info(f'Processed data shape: {processed_df.shape}')
         return processed_df
     
     def process_data_to_numpy(self, idx):
         out_filepath = self.files_dict[idx]['out']
         # check whether the file already exists
         if os.path.exists(out_filepath):
-            logging.info(f'Processed data already exists at {out_filepath}')
+            self.logger.info(f'Processed data already exists at {out_filepath}')
             return
         processed_df = self.get_processed_data_df(idx)
         pivot = processed_df.pivot(index='Ping No',
@@ -203,7 +214,7 @@ class DataProcessor:
         data['Y_interp'] = interpolate_array(data['Y'], data['rejected'])
         data['Z_interp'] = interpolate_array(data['Z'], data['rejected'])
         np.savez(out_filepath, **data)
-        logging.info(f'Processed data saved to {out_filepath}')
+        self.logger.info(f'Processed data saved to {out_filepath}')
         return processed_df, pivot
 
     def plot_numpy_data(self, idx, savefig=True, suffix='', num_rows=2, filter_rejected=False,
@@ -229,7 +240,7 @@ class DataProcessor:
     def process_folder(self, plot=True):
         for idx in tqdm(self.files_dict.keys()):
             try:
-                logging.info(f'Processing idx={idx}...')
+                self.logger.info(f'Processing idx={idx}...')
                 self.process_data_to_numpy(idx)
                 if plot:
                     self.plot_numpy_data(idx)
