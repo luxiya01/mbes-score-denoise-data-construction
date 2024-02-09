@@ -5,6 +5,30 @@ from tqdm import tqdm
 import re
 import os
 import matplotlib.pyplot as plt
+from scipy.interpolate import griddata
+
+
+def interpolate_array(arr, rejected, method='linear', resolution=1):
+    """
+    Filter an array based on a boolean filter and interpolate missing values.
+    Method: 'linear', 'nearest', 'cubic'
+    """
+    # set up the grid
+    x = np.arange(0, arr.shape[0], step=resolution)
+    y = np.arange(0, arr.shape[1], step=resolution)
+    xv, yv = np.meshgrid(x, y, indexing='ij')
+
+    # filter array and get indices where it is not nan
+    valid_idx = np.where(~rejected)
+
+    # interpolate the data
+    arr_interp = griddata(
+        valid_idx,
+        arr[valid_idx],
+        (xv, yv),
+        method=method,
+    )
+    return arr_interp
 
 class DataProcessor:
     """
