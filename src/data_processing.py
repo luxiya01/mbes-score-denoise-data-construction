@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 from scipy.interpolate import griddata
 
 
-def interpolate_array(arr, rejected, method='linear', resolution=1):
+def interpolate_array(arr, rejected, method='nearest', resolution=1):
     """
     Filter an array based on a boolean filter and interpolate missing values.
     Method: 'linear', 'nearest', 'cubic'
@@ -221,20 +221,24 @@ class DataProcessor:
                         keys=['X', 'Y', 'Z', 'intensity', 'angle', 'quality', 'rejected', 'roll', 'pitch', 'heading']):
         filename = self.files_dict[idx]['out']
         data = np.load(filename)
-        num_columns = (len(keys)+1)//num_rows
+        num_columns = (len(keys)+1)//num_rows if num_rows > 1 else len(keys)
         fig, axes = plt.subplots(num_rows, num_columns, figsize=(num_columns*3, num_columns*3))
         for i, key in enumerate(keys):
-            a = axes[i//num_columns, i%num_columns]
+            if num_rows == 1:
+                a = axes[i]
+            else:
+                a = axes[i//num_columns, i%num_columns]
             im = data[key]
             if filter_rejected:
+                im = im.astype(float)
                 im[data['rejected']] = np.nan
             fig.colorbar(a.imshow(im), ax=a)
             a.set_title(key)
         if savefig:
             fig.tight_layout()
+            filename = os.path.basename(filename).split('.')[0]
             figname = f'{filename}{suffix}-filtered.png' if filter_rejected else f'{filename}{suffix}.png'
-            fig.savefig(os.path.join(self.out_folder, figname),
-                                    dpi=150, bbox_inches='tight')
+            fig.savefig(figname, dpi=150, bbox_inches='tight')
             plt.close(fig)
 
     def process_folder(self, plot=True):
