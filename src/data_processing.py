@@ -137,7 +137,10 @@ class DataProcessor:
     
     def _parse_raw_pings(self, idx):
         filename = self.files_dict[idx]['pings']
-        df = pd.read_csv(filename, sep='\t')
+        df = pd.read_csv(filename, sep='\t',
+                         dtype={'yyyy': str,
+                                'mmddhhmm': str,
+                                'ss.ss': str})
         # set scan_no to start from 0 and cumulate per ping
         df['scan_no'] = (df['Ping No'] != df['Ping No'].shift(1)).cumsum() - 1
         df['beam_id'] = df['Beam No']
