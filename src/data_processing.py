@@ -65,7 +65,8 @@ class DataProcessor:
 
     def _get_files_dict(self):
         files_dict = {}
-        for filename in os.listdir(self.pings_folder):
+        for filename in sorted(os.listdir(self.pings_folder),
+                               key=lambda x: int(x.split('-')[1])):
             idx = int(filename.split('-')[1])
             files_dict[idx] = {
                 'pings': os.path.join(self.pings_folder, filename),
