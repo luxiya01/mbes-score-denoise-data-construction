@@ -58,6 +58,7 @@ class DataProcessor:
         self.angle_folder = os.path.join(self.folder, 'angle-quality')
         self.intensity_folder = os.path.join(self.folder, 'intensity')
         self.cleaned_folder = os.path.join(self.folder, 'cleaned')
+        self.motion_folder = os.path.join(self.folder, 'motion')
         self.out_folder = os.path.join(self.folder, 'merged')
         if not os.path.exists(self.out_folder):
             os.makedirs(self.out_folder)
@@ -71,6 +72,7 @@ class DataProcessor:
                 'angle_quality': os.path.join(self.angle_folder, filename),
                 'intensity': os.path.join(self.intensity_folder, f'{filename}i'),
                 'cleaned': os.path.join(self.cleaned_folder, filename),
+                'motion': os.path.join(self.motion_folder, f'{filename.split(".")[0]}.csv'),
                 'out': os.path.join(self.out_folder, filename) + '.npz',
             }
         return files_dict
@@ -134,6 +136,15 @@ class DataProcessor:
         cleaned_df['rejected'].fillna(False, inplace=True)
         self.logger.info(f'Cleaned data shape: {cleaned_df.shape}')
         return cleaned_df[['X', 'Y', 'Z', 'rejected']]
+
+    def _parse_motion(self, idx):
+        filename = self.files_dict[idx]['motion']
+        motion_df = pd.read_csv(filename, dtype={'Date': str, 'Time': str})
+        motion_df['datetime'] = pd.to_datetime(motion_df['Date'] + motion_df['Time'],
+                                               format='%Y-%m-%d%H:%M:%S.%f')
+        self.logger.info(f'Motion data shape: {motion_df.shape}')
+        return motion_df
+
     
     def _parse_raw_pings(self, idx):
         filename = self.files_dict[idx]['pings']
@@ -168,13 +179,23 @@ class DataProcessor:
         Returns:
         - processed_df (pandas.DataFrame): The processed data dataframe.
         """
+        # Load and parse relevant raw data
         pings_df = self._parse_raw_pings(idx)
         cleaned_df = self._parse_cleaned(idx)
         angle_quality_df = self.get_angle_quality_and_intensity_df(idx)
+        motion_df = self._parse_motion(idx)[['datetime', 'Depth']]
+
+        # Merge pings_df and motion_df based on datetime
+        pings_df = pd.merge_asof(pings_df.sort_values('datetime'),
+                                 motion_df.sort_values('datetime'),
+                                 on='datetime',
+                                 direction='nearest')
+        pings_df['Z_relative'] = pings_df['Z'] - pings_df['Depth']
 
         # Merge the three dataframes based on XYZ
         processed_df = pd.merge(pings_df, angle_quality_df, on=['scan_no', 'beam_id', 'X', 'Y', 'Z'], how='outer')
         processed_df = pd.merge(processed_df, cleaned_df, on=['X', 'Y', 'Z'], how='outer')
+
 
         # Drop any duplicated rows
         processed_df.drop_duplicates(subset=['Ping No', 'Beam No', 'X', 'Y', 'Z'], inplace=True)
@@ -185,17 +206,21 @@ class DataProcessor:
         return processed_df
     
     def process_data_to_numpy(self, idx):
+        """
+        Process the data for a given index and save it to a numpy file.
+        Returns True if the data was processed and saved, False if it already exists.
+        """
         out_filepath = self.files_dict[idx]['out']
         # check whether the file already exists
         if os.path.exists(out_filepath):
             self.logger.info(f'Processed data already exists at {out_filepath}')
-            return
+            return False
         processed_df = self.get_processed_data_df(idx)
         pivot = processed_df.pivot(index='Ping No',
                                    columns='Beam No',
                                    values=[
-                                       'X', 'Y', 'Z', 'intensity',
-                                       'angle', 'quality', 'rejected',
+                                       'X', 'Y', 'Z', 'Z_relative', 'Depth',
+                                       'intensity', 'angle', 'quality', 'rejected',
                                        'Roll', 'Pitch', 'Heading', 'Heave',
                                        'datetime'
                                   ])
@@ -203,6 +228,8 @@ class DataProcessor:
             'X': pivot['X'].to_numpy().astype(np.float32),
             'Y': pivot['Y'].to_numpy().astype(np.float32),
             'Z': pivot['Z'].to_numpy().astype(np.float32),
+            'Z_relative': pivot['Z_relative'].to_numpy().astype(np.float32),
+            'depth': pivot['Depth'].to_numpy().astype(np.float32),
             'intensity': pivot['intensity'].to_numpy().astype(np.int),
             'angle': pivot['angle'].to_numpy().astype(np.float32),
             'quality': pivot['quality'].to_numpy().astype(np.int),
@@ -213,15 +240,18 @@ class DataProcessor:
             'heave': pivot['Heave'].to_numpy().astype(np.float32),
             'datetime': pivot['datetime'].to_numpy().astype(np.datetime64),
         }
-        data['X_interp'] = interpolate_array(data['X'], data['rejected'])
-        data['Y_interp'] = interpolate_array(data['Y'], data['rejected'])
-        data['Z_interp'] = interpolate_array(data['Z'], data['rejected'])
+        for method in ['linear', 'nearest', 'cubic']:
+            data[f'X_interp_{method}'] = interpolate_array(data['X'], data['rejected'], method=method)
+            data[f'Y_interp_{method}'] = interpolate_array(data['Y'], data['rejected'], method=method)
+            data[f'Z_interp_{method}'] = interpolate_array(data['Z'], data['rejected'], method=method)
+            data[f'Z_relative_interp_{method}'] = interpolate_array(data['Z_relative'], data['rejected'], method=method)
         np.savez(out_filepath, **data)
         self.logger.info(f'Processed data saved to {out_filepath}')
-        return processed_df, pivot
+        return True
 
     def plot_numpy_data(self, idx, savefig=True, suffix='', num_rows=2, filter_rejected=False,
-                        keys=['X', 'Y', 'Z', 'intensity', 'angle', 'quality', 'rejected', 'roll', 'pitch', 'heading']):
+                        keys=['X', 'Y', 'Z', 'Z_relative', 'intensity', 'depth',
+                              'quality', 'rejected', 'angle', 'roll', 'pitch', 'heading']):
         filename = self.files_dict[idx]['out']
         data = np.load(filename)
         num_columns = (len(keys)+1)//num_rows if num_rows > 1 else len(keys)
@@ -248,11 +278,17 @@ class DataProcessor:
         for idx in tqdm(self.files_dict.keys()):
             try:
                 self.logger.info(f'Processing idx={idx}...')
-                self.process_data_to_numpy(idx)
-                if plot:
+                success = self.process_data_to_numpy(idx)
+                if success and plot:
                     self.plot_numpy_data(idx)
                     self.plot_numpy_data(idx, filter_rejected=True)
-                    self.plot_numpy_data(idx, suffix='-interp', keys=['X_interp', 'Y_interp', 'Z_interp'],
-                                         num_rows=1, filter_rejected=False)
+                    for method in ['linear', 'nearest', 'cubic']:
+                        suffix = f'_interp_{method}'
+                        self.plot_numpy_data(idx, suffix=suffix,
+                                             keys=[f'X{suffix}',
+                                                   f'Y{suffix}',
+                                                   f'Z{suffix}',
+                                                   f'Z_relative{suffix}'],
+                                             num_rows=1, filter_rejected=False)
             except Exception as e:
                 logging.error(f'Error processing file idx={idx}: {e}')
