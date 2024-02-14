@@ -347,8 +347,8 @@ class DataProcessor:
                 patch['start_beam'] = j
                 patch['end_ping'] = i+pings_per_patch
                 patch['end_beam'] = j+beams_per_patch
-                num_patches += 1
                 np.savez(os.path.join(patches_folder, f'patch_{num_patches}.npz'), **patch)
+                num_patches += 1
                 del patch
         self.logger.info(f'Created {num_patches} patches\n'
                          f'saved to {patches_folder}')
