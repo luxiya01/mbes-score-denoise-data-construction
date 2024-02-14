@@ -1,3 +1,4 @@
+from collections import defaultdict
 import logging
 import pandas as pd
 import numpy as np
@@ -292,4 +293,35 @@ class DataProcessor:
                                                    f'Z_relative{suffix}'],
                                              num_rows=1, filter_rejected=False)
             except Exception as e:
-                logging.error(f'Error processing file idx={idx}: {e}')
+                self.logger.error(f'Error processing file idx={idx}: {e}')
+
+    def merge_all_npz_data(self):
+        """
+        Merge all the processed data into a single .npz file,
+        requires that all the .xyz data to be processed, e.g.
+        using the process_folder() method.
+        """
+        all_data_path = os.path.join(self.out_folder, 'all_data.npz')
+        if os.path.exists(all_data_path):
+            self.logger.info(f'Using existing all_data.npz at {all_data_path}')
+            return np.load(all_data_path, allow_pickle=True)
+
+        # If not all processed data exists, raise an error
+        if not os.path.exists(self.out_folder):
+            self.logger.error('No processed data found. Run process_folder() first.')
+        for k, v in self.files_dict.items():
+            if not os.path.exists(v['out']):
+                self.logger.error(f'Processed data not found for file idx {k}. Run process_folder() first.')
+
+        # Load and concatenate all numpy data
+        self.logger.info('Merging all data...')
+        all_data_dict = defaultdict(list)
+        for idx, filepaths in tqdm(self.files_dict.items()):
+            data = np.load(filepaths['out'], allow_pickle=True)
+            for file in data.files:
+                all_data_dict[file].append(data[file])
+        for k, v in all_data_dict.items():
+            all_data_dict[k] = np.concatenate(v, axis=0)
+        self.logger.info(f'All data shape: {all_data_dict["X"].shape}')
+        np.savez(all_data_path, **all_data_dict)
+        return all_data_dict
