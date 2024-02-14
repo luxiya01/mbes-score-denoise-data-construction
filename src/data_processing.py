@@ -325,3 +325,30 @@ class DataProcessor:
         self.logger.info(f'All data shape: {all_data_dict["X"].shape}')
         np.savez(all_data_path, **all_data_dict)
         return all_data_dict
+
+    def create_patches(self, pings_per_patch, beams_per_patch):
+        all_data = self.merge_all_npz_data()
+        folder_name = f'patches_{pings_per_patch}pings_{beams_per_patch}_beams'
+        patches_folder = os.path.join(self.out_folder, folder_name)
+        if not os.path.exists(patches_folder):
+            os.makedirs(patches_folder)
+        else:
+            self.logger.warning(f'Patches folder {patches_folder} already exists. Overwriting...')
+
+        self.logger.info(f'Creating patches with size ({pings_per_patch}, {beams_per_patch})...')
+        num_pings, num_beams = all_data['X'].shape
+        num_patches = 0
+        for i in tqdm(range(0, num_pings, pings_per_patch)):
+            for j in tqdm(range(0, num_beams, beams_per_patch)):
+                patch = {k: v[i:i+pings_per_patch, j:j+beams_per_patch]
+                         for k, v in all_data.items()}
+                patch['idx'] = num_patches
+                patch['start_ping'] = i
+                patch['start_beam'] = j
+                patch['end_ping'] = i+pings_per_patch
+                patch['end_beam'] = j+beams_per_patch
+                num_patches += 1
+                np.savez(os.path.join(patches_folder, f'patch_{num_patches}.npz'), **patch)
+                del patch
+        self.logger.info(f'Created {num_patches} patches\n'
+                         f'saved to {patches_folder}')
