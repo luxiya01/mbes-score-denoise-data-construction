@@ -6,30 +6,6 @@ from tqdm import tqdm
 import re
 import os
 import matplotlib.pyplot as plt
-from scipy.interpolate import griddata
-
-
-def interpolate_array(arr, rejected, method='nearest', resolution=1):
-    """
-    Filter an array based on a boolean filter and interpolate missing values.
-    Method: 'linear', 'nearest', 'cubic'
-    """
-    # set up the grid
-    x = np.arange(0, arr.shape[0], step=resolution)
-    y = np.arange(0, arr.shape[1], step=resolution)
-    xv, yv = np.meshgrid(x, y, indexing='ij')
-
-    # filter array and get indices where it is not nan
-    valid_idx = np.where(~rejected)
-
-    # interpolate the data
-    arr_interp = griddata(
-        valid_idx,
-        arr[valid_idx],
-        (xv, yv),
-        method=method,
-    )
-    return arr_interp
 
 class DataProcessor:
     """
@@ -60,6 +36,7 @@ class DataProcessor:
         self.intensity_folder = os.path.join(self.folder, 'intensity')
         self.cleaned_folder = os.path.join(self.folder, 'cleaned')
         self.motion_folder = os.path.join(self.folder, 'motion')
+        self.vehicle_pos_folder = os.path.join(self.folder, 'vehicle-pos')
         self.out_folder = os.path.join(self.folder, 'merged')
         if not os.path.exists(self.out_folder):
             os.makedirs(self.out_folder)
@@ -75,7 +52,8 @@ class DataProcessor:
                 'intensity': os.path.join(self.intensity_folder, f'{filename}i'),
                 'cleaned': os.path.join(self.cleaned_folder, filename),
                 'motion': os.path.join(self.motion_folder, f'{filename.split(".")[0]}.csv'),
-                'out': os.path.join(self.out_folder, filename) + '.npz',
+                'vehicle_pos': os.path.join(self.vehicle_pos_folder, f'{filename.split(".")[0]}.nav'),
+                'out': os.path.join(self.out_folder, filename) + '.npz'
             }
         return files_dict
 
@@ -147,6 +125,15 @@ class DataProcessor:
         self.logger.info(f'Motion data shape: {motion_df.shape}')
         return motion_df
 
+    def _parse_vehicle_pos(self, idx):
+        filename = self.files_dict[idx]['vehicle_pos']
+        vehicle_pos_df = pd.read_csv(filename, sep=r',\s*', engine='python', dtype={'DATE': str, 'TIME': str})
+        vehicle_pos_df['datetime'] = pd.to_datetime(vehicle_pos_df['DATE'] + vehicle_pos_df['TIME'],
+                                                    format='%Y%m%d%H:%M:%S.%f')
+        vehicle_pos_df.rename(columns={'EASTING': 'easting', 'NORTHING': 'northing'}, inplace=True)
+        self.logger.info(f'Vehicle position data shape: {vehicle_pos_df.shape}')
+        return vehicle_pos_df
+
     
     def _parse_raw_pings(self, idx):
         filename = self.files_dict[idx]['pings']
@@ -185,7 +172,13 @@ class DataProcessor:
         pings_df = self._parse_raw_pings(idx)
         cleaned_df = self._parse_cleaned(idx)
         angle_quality_df = self.get_angle_quality_and_intensity_df(idx)
-        motion_df = self._parse_motion(idx)[['datetime', 'Depth']]
+        motion_df = self._parse_motion(idx)[['datetime', 'Depth', 'Lat', 'Long']]
+        # merge vehicle_pos_df and motion_df based on datetime
+        vehicle_pos_df = self._parse_vehicle_pos(idx)[['datetime', 'easting', 'northing']]
+        motion_df = pd.merge_asof(motion_df.sort_values('datetime'),
+                                    vehicle_pos_df.sort_values('datetime'),
+                                    on='datetime',
+                                    direction='nearest')
 
         # Merge pings_df and motion_df based on datetime
         pings_df = pd.merge_asof(pings_df.sort_values('datetime'),
@@ -206,24 +199,15 @@ class DataProcessor:
 
         self.logger.info(f'Processed data shape: {processed_df.shape}')
         return processed_df
-    
-    def process_data_to_numpy(self, idx):
-        """
-        Process the data for a given index and save it to a numpy file.
-        Returns True if the data was processed and saved, False if it already exists.
-        """
-        out_filepath = self.files_dict[idx]['out']
-        # check whether the file already exists
-        if os.path.exists(out_filepath):
-            self.logger.info(f'Processed data already exists at {out_filepath}')
-            return False
-        processed_df = self.get_processed_data_df(idx)
+
+    def _processed_data_df_to_numpy_dict(self, processed_df):
         pivot = processed_df.pivot(index='Ping No',
                                    columns='Beam No',
                                    values=[
                                        'X', 'Y', 'Z', 'Z_relative', 'Depth',
                                        'intensity', 'angle', 'quality', 'rejected',
                                        'Roll', 'Pitch', 'Heading', 'Heave',
+                                       'Lat', 'Long', 'easting', 'northing',
                                        'datetime'
                                   ])
         data = {
@@ -240,13 +224,28 @@ class DataProcessor:
             'pitch': pivot['Pitch'].to_numpy().astype(np.float32),
             'heading': pivot['Heading'].to_numpy().astype(np.float32),
             'heave': pivot['Heave'].to_numpy().astype(np.float32),
+            'lat': pivot['Lat'].to_numpy().astype(np.float32),
+            'long': pivot['Long'].to_numpy().astype(np.float32),
+            'easting': pivot['easting'].to_numpy().astype(np.float32),
+            'northing': pivot['northing'].to_numpy().astype(np.float32),
             'datetime': pivot['datetime'].to_numpy().astype(np.datetime64),
         }
-        for method in ['linear', 'nearest', 'cubic']:
-            data[f'X_interp_{method}'] = interpolate_array(data['X'], data['rejected'], method=method)
-            data[f'Y_interp_{method}'] = interpolate_array(data['Y'], data['rejected'], method=method)
-            data[f'Z_interp_{method}'] = interpolate_array(data['Z'], data['rejected'], method=method)
-            data[f'Z_relative_interp_{method}'] = interpolate_array(data['Z_relative'], data['rejected'], method=method)
+        return data
+
+    def process_data_to_numpy(self, idx):
+        """
+        Process the data for a given index and save it to a numpy file.
+        Returns True if the data was processed and saved, False if it already exists.
+        """
+        out_filepath = self.files_dict[idx]['out']
+
+        # check whether the file already exists
+        if os.path.exists(out_filepath):
+            self.logger.info(f'Processed data already exists at {out_filepath}')
+            return False
+        processed_df = self.get_processed_data_df(idx)
+        data = self._processed_data_df_to_numpy_dict(processed_df)
+
         np.savez(out_filepath, **data)
         self.logger.info(f'Processed data saved to {out_filepath}')
         return True
@@ -284,14 +283,7 @@ class DataProcessor:
                 if success and plot:
                     self.plot_numpy_data(idx)
                     self.plot_numpy_data(idx, filter_rejected=True)
-                    for method in ['linear', 'nearest', 'cubic']:
-                        suffix = f'_interp_{method}'
-                        self.plot_numpy_data(idx, suffix=suffix,
-                                             keys=[f'X{suffix}',
-                                                   f'Y{suffix}',
-                                                   f'Z{suffix}',
-                                                   f'Z_relative{suffix}'],
-                                             num_rows=1, filter_rejected=False)
+
             except Exception as e:
                 self.logger.error(f'Error processing file idx={idx}: {e}')
 
