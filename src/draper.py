@@ -23,18 +23,19 @@ def get_draper(mesh_path, svp_path, resolution):
     return draper
 
 
-def generate_groundtruth_for_file(data_path, draper, num_beams=400, mbes_angle=120):
+def generate_groundtruth_for_file(data_path, draper):
     """
     Generate groundtruth data using a BaseDraper object and the AUV trajectory in
     the given data file.
     """
     T_mbes_RX = np.array([3.52, -0.003, -0.33])
-    R_mbes_yaw = R.from_euler("zyx", degrees=True, angles=[0.1, 0, 0])
-    mbes_angle = np.deg2rad(mbes_angle)
+    R_mbes_full = R.from_euler("zyx", degrees=True, angles=[0.1, 0.4, 0.149])
 
     data = np.load(data_path, allow_pickle=True)
     raw_pings = np.stack([data["X"], data["Y"], data["Z_relative"]], axis=-1)
     draping_results = np.zeros_like(raw_pings)
+    # Transform AUV angles from NED to ENU (flip the angles)
+    raw_angles = np.deg2rad(data['angle'][:, ::-1])
     # Transform AUV position from NED to ENU
     auv_pos = np.stack(
         [data["easting"][:, 0], data["northing"][:, 0], -data["depth"][:, 0]], axis=-1
@@ -46,17 +47,26 @@ def generate_groundtruth_for_file(data_path, draper, num_beams=400, mbes_angle=1
     for idx, pos in tqdm(enumerate(auv_pos), total=auv_pos.shape[0]):
         R_auv = R.from_euler("zyx", degrees=True, angles=auv_yaw[idx])
         pos = pos + R_auv.apply(T_mbes_RX)
-        rotation = R_auv * R_mbes_yaw
+        rotation = R_auv * R_mbes_full
 
-        draped_ping, draping_idx = draper.project_mbes_with_hits_idx(
-            pos, rotation.as_matrix(), num_beams, mbes_angle
+        draped_ping, draping_idx = draper.project_mbes_with_hits_idx_given_angles(
+            pos, rotation.as_matrix(), raw_angles[idx],
         )
         valid_idx = np.where(draping_idx.flatten())
 
         # compute Z relative to the auv position
         draped_ping[:, -1] = pos[-1] - draped_ping[:, -1]
         draping_results[idx, valid_idx] = draped_ping
+    print(f'% points without draping hits: {compute_percentage_points_without_draping_hits(draping_results):.2f}')
     return draping_results
+
+def compute_percentage_points_without_draping_hits(draping_results):
+    """
+    Compute the percentage of points without draping hits in the draping results.
+    """
+    num_points = np.prod(draping_results.shape[:2])
+    num_points_without_draping_hits = np.sum(np.all(draping_results == 0, axis=-1))
+    return num_points_without_draping_hits / num_points * 100
 
 def parse_args():
     parser = ArgumentParser()
@@ -65,7 +75,6 @@ def parse_args():
     parser.add_argument('--data_path', type=str, required=True)
     parser.add_argument('--resolution', type=float, required=True) #meters
     parser.add_argument('--num_beams', type=int, default=400)
-    parser.add_argument('--mbes_angle', type=int, default=120)
     return parser.parse_args()
 
 def main():
@@ -75,7 +84,7 @@ def main():
     output_path = os.path.join(parent_path, f"{data_filename}_draping_gt_{args.resolution}m.npy")
 
     draper = get_draper(args.mesh_path, args.svp_path, args.resolution)
-    draping_results = generate_groundtruth_for_file(args.data_path, draper, args.num_beams, args.mbes_angle)
+    draping_results = generate_groundtruth_for_file(args.data_path, draper)
     np.save(output_path, draping_results)
 
 if __name__ == '__main__':
