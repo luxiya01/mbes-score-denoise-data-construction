@@ -24,7 +24,7 @@ def get_draper(mesh_path, svp_path, resolution):
     return draper
 
 
-def generate_groundtruth_for_file(data_path, draper, crs_code=32632):
+def generate_groundtruth_for_file(data_path, draper, crs_code=32632, interp=False):
     """
     Generate groundtruth data using a BaseDraper object and the AUV trajectory in
     the given data file.
@@ -42,6 +42,8 @@ def generate_groundtruth_for_file(data_path, draper, crs_code=32632):
     data = np.load(data_path, allow_pickle=True)
     raw_pings = np.stack([data["X"], data["Y"], data["Z_relative"]], axis=-1)
     draping_results = np.zeros_like(raw_pings)
+    if interp:
+        draping_results = np.zeros((raw_pings.shape[0], 800, 3))
     # Transform AUV angles from NED to ENU (flip the angles)
     raw_angles = np.deg2rad(data['angle'][:, ::-1])
 
@@ -71,6 +73,11 @@ def generate_groundtruth_for_file(data_path, draper, crs_code=32632):
         rotation = R_auv * R_mbes_full
 
         raw_angles_idx = raw_angles[idx]
+
+        if interp:
+            x_axis = np.arange(400)
+            x_double = np.arange(0, 400, .5)
+            raw_angles_idx = np.interp(x_double, x_axis, raw_angles_idx)
 
         draped_ping, draping_idx = draper.project_mbes_with_hits_idx_given_angles(
             pos, rotation.as_matrix(), raw_angles_idx,
@@ -102,6 +109,7 @@ def parse_args():
     parser.add_argument('--data_path', type=str, required=True)
     parser.add_argument('--resolution', type=float, required=True, help='mesh resolution in meters')
     parser.add_argument('--crs_code', type=int, default=32632, help='CRS code for meridian convergence')
+    parser.add_argument('--interp', action='store_true', help='Interpolate the angles double the angular resolution')
     parser.add_argument('--suffix', type=str, default='')
     return parser.parse_args()
 
@@ -114,7 +122,7 @@ def main():
     draper = get_draper(args.mesh_path, args.svp_path, args.resolution)
     draping_results = generate_groundtruth_for_file(args.data_path, draper,
                                                     crs_code=args.crs_code,
-                                                    )
+                                                    interp=args.interp)
     np.save(output_path, draping_results)
 
 if __name__ == '__main__':
