@@ -108,11 +108,70 @@ def compute_percentage_points_without_draping_hits(draping_results):
     return num_points_without_draping_hits / num_points * 100
 
 
+def drape_one_file(
+    data_path, mesh_path, svp_path, out_path, resolution, crs_code, interp=False
+):
+    draper = get_draper(mesh_path, svp_path, resolution)
+    draping_results = generate_groundtruth_for_file(data_path, draper, crs_code, interp)
+    np.save(out_path, draping_results)
+
+
+def construct_patches(draping_res_folder, pings_per_patch, beams_per_patch):
+    """
+    Construct patches from the draping results in the given folder.
+    """
+    all_data = []
+    draping_files = sorted(
+        [x for x in os.listdir(draping_res_folder) if x.endswith(".npy")],
+        key=lambda x: int(x.split("-")[1]),
+    )
+    for draping_file in tqdm(draping_files):
+        draping_path = os.path.join(draping_res_folder, draping_file)
+        draping_results = np.load(draping_path, allow_pickle=True)
+        all_data.append(draping_results)
+    all_data = np.concatenate(all_data, axis=0)
+
+    patch_folder = os.path.join(
+        draping_res_folder, f"patches_{pings_per_patch}pings_{beams_per_patch}beams"
+    )
+    os.makedirs(patch_folder, exist_ok=True)
+    num_patches = 0
+    num_pings, num_beams, _ = all_data.shape
+    for i in tqdm(range(0, num_pings, pings_per_patch)):
+        for j in range(0, num_beams, beams_per_patch):
+            patch = all_data[i : i + pings_per_patch, j : j + beams_per_patch]
+            valid_mask = ~np.ma.masked_less_equal(patch[:, :, 2], 0).mask
+            np.savez(
+                os.path.join(patch_folder, f"patch_{num_patches}.npz"),
+                data=patch,
+                valid_mask=valid_mask,
+            )
+            num_patches += 1
+    print(f"Created {num_patches} patches.")
+    return num_patches
+
+
 def parse_args():
     parser = ArgumentParser()
-    parser.add_argument("--mesh_path", type=str, required=True)
+    parser.add_argument(
+        "--data_folder",
+        type=str,
+        required=False,
+        help="Folder containing the mesh and data files",
+    )
+    parser.add_argument(
+        "--mesh_path",
+        type=str,
+        required=False,
+        help="Path to the mesh file (if data_folder is not provided)",
+    )
+    parser.add_argument(
+        "--data_path",
+        type=str,
+        required=False,
+        help="Path to the data file (if data_folder is not provided)",
+    )
     parser.add_argument("--svp_path", type=str, required=True)
-    parser.add_argument("--data_path", type=str, required=True)
     parser.add_argument(
         "--resolution", type=float, required=True, help="mesh resolution in meters"
     )
@@ -125,22 +184,62 @@ def parse_args():
         help="Interpolate the angles double the angular resolution",
     )
     parser.add_argument("--suffix", type=str, default="")
+
+    # args for creating patches
+    parser.add_argument("--create_patches", action="store_true")
+    parser.add_argument("--pings_per_patch", type=int, default=32)
+    parser.add_argument("--beams_per_patch", type=int, default=400)
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
-    parent_path = os.path.dirname(args.data_path)
-    data_filename = os.path.basename(args.data_path).split(".")[0]
-    output_path = os.path.join(
-        parent_path, f"{data_filename}_draping_gt_{args.resolution}m_{args.suffix}.npy"
-    )
 
-    draper = get_draper(args.mesh_path, args.svp_path, args.resolution)
-    draping_results = generate_groundtruth_for_file(
-        args.data_path, draper, crs_code=args.crs_code, interp=args.interp
-    )
-    np.save(output_path, draping_results)
+    if args.data_folder:
+        mesh_folder = os.path.join(args.data_folder, "mesh")
+        data_folder = os.path.join(args.data_folder, "merged")
+        draping_res_folder = os.path.join(
+            args.data_folder, f"draping_{args.resolution}m_{args.suffix}"
+        )
+        os.makedirs(draping_res_folder, exist_ok=True)
+
+        for data_file in sorted(
+            os.listdir(mesh_folder), key=lambda x: int(x.split("-")[1])
+        ):
+            print(f"\nProcessing {data_file}...")
+            data_path = os.path.join(data_folder, f"{data_file}.npz")
+            mesh_path = os.path.join(mesh_folder, data_file)
+            out_path = os.path.join(draping_res_folder, data_file)
+            drape_one_file(
+                data_path,
+                mesh_path,
+                args.svp_path,
+                out_path,
+                args.resolution,
+                args.crs_code,
+                args.interp,
+            )
+
+        if args.create_patches:
+            construct_patches(
+                draping_res_folder, args.pings_per_patch, args.beams_per_patch
+            )
+    else:
+        parent_path = os.path.dirname(args.data_path)
+        data_filename = os.path.basename(args.data_path).split(".")[0]
+        output_path = os.path.join(
+            parent_path,
+            f"{data_filename}_draping_gt_{args.resolution}m_{args.suffix}.npy",
+        )
+        drape_one_file(
+            args.data_path,
+            args.mesh_path,
+            args.svp_path,
+            output_path,
+            args.resolution,
+            args.crs_code,
+            args.interp,
+        )
 
 
 if __name__ == "__main__":
