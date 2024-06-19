@@ -149,6 +149,9 @@ def construct_patches(draping_res_folder, pings_per_patch, beams_per_patch,
             for j in range(0, num_beams, beams_per_patch):
                 patch = current_data[i : i + pings_per_patch, j : j + beams_per_patch]
                 valid_mask = ~np.ma.masked_less_equal(patch[:, :, 2], 0).mask
+                # check if valid_mask is a single np bool = True
+                if valid_mask.ndim == 0 and valid_mask.item() is True:
+                    valid_mask = np.ones_like(patch[:, :, 2], dtype=bool).reshape(patch.shape[:2])
                 np.savez(
                     os.path.join(patch_folder, f"patch_{num_patches}.npz"),
                     data=patch,
