@@ -399,10 +399,33 @@ class DataProcessor:
         np.savez(all_data_path, **all_data_dict)
         return all_data_dict
 
-    def create_patches(self, pings_per_patch, beams_per_patch):
-        all_data = self.merge_all_npz_data()
+    def split_data_into_train_and_test(self, all_data_path, test_pings=[84487, 148283]):
+        """
+        Split the merged data into train and test sets based on the test_pings.
+        """
+        all_data = np.load(all_data_path, allow_pickle=True)
+        train_data_part1 = {}
+        train_data_part2 = {}
+        test_data = {}
+        for k, v in all_data.items():
+            train_data_part1[k] = v[:test_pings[0]]
+            train_data_part2[k] = v[test_pings[1] :]
+            test_data[k] = v[test_pings[0] : test_pings[1]]
+        self.logger.info(f'Train data part 1 pings = [0:{test_pings[0]}], shape: {train_data_part1["X"].shape}')
+        self.logger.info(f'Train data part 2 pings = [{test_pings[1]}:], shape: {train_data_part2["X"].shape}')
+        self.logger.info(f'Test data pings = [{test_pings[0]}:{test_pings[1]}], shape: {test_data["X"].shape}')
+        np.savez(os.path.join(self.out_folder, "train_data_part1.npz"), **train_data_part1)
+        np.savez(os.path.join(self.out_folder, "train_data_part2.npz"), **train_data_part2)
+        np.savez(os.path.join(self.out_folder, "test_data.npz"), **test_data)
+        return train_data_part1, train_data_part2, test_data
+
+
+    def create_patches(self, data_path, pings_per_patch, beams_per_patch):
+        # all_data = self.merge_all_npz_data()
+        all_data = np.load(data_path, allow_pickle=True)
         folder_name = f"patches_{pings_per_patch}pings_{beams_per_patch}_beams"
-        patches_folder = os.path.join(self.out_folder, folder_name)
+        patches_folder = os.path.join(self.out_folder,
+                                      os.path.join(folder_name, os.path.basename(data_path)))
         if not os.path.exists(patches_folder):
             os.makedirs(patches_folder)
         else:

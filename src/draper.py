@@ -116,7 +116,8 @@ def drape_one_file(
     np.save(out_path, draping_results)
 
 
-def construct_patches(draping_res_folder, pings_per_patch, beams_per_patch):
+def construct_patches(draping_res_folder, pings_per_patch, beams_per_patch,
+                      test_pings=[84487, 148283]):
     """
     Construct patches from the draping results in the given folder.
     """
@@ -130,25 +131,34 @@ def construct_patches(draping_res_folder, pings_per_patch, beams_per_patch):
         draping_results = np.load(draping_path, allow_pickle=True)
         all_data.append(draping_results)
     all_data = np.concatenate(all_data, axis=0)
+    np.savez(os.path.join(draping_res_folder, "all_data.npz"), data=all_data)
+    np.savez(os.path.join(draping_res_folder, "test_data.npz"), data=all_data[test_pings[0]:test_pings[1]])
+    np.savez(os.path.join(draping_res_folder, "train_data_part1.npz"), data=all_data[:test_pings[0]])
+    np.savez(os.path.join(draping_res_folder, "train_data_part2.npz"), data=all_data[test_pings[1]:])
 
-    patch_folder = os.path.join(
-        draping_res_folder, f"patches_{pings_per_patch}pings_{beams_per_patch}beams"
-    )
-    os.makedirs(patch_folder, exist_ok=True)
-    num_patches = 0
-    num_pings, num_beams, _ = all_data.shape
-    for i in tqdm(range(0, num_pings, pings_per_patch)):
-        for j in range(0, num_beams, beams_per_patch):
-            patch = all_data[i : i + pings_per_patch, j : j + beams_per_patch]
-            valid_mask = ~np.ma.masked_less_equal(patch[:, :, 2], 0).mask
-            np.savez(
-                os.path.join(patch_folder, f"patch_{num_patches}.npz"),
-                data=patch,
-                valid_mask=valid_mask,
-            )
-            num_patches += 1
-    print(f"Created {num_patches} patches.")
-    return num_patches
+    total_num_patches = 0
+    for f in ["train_data_part1.npz", "train_data_part2.npz", "test_data.npz"]:
+        current_data = np.load(os.path.join(draping_res_folder, f), allow_pickle=True)["data"]
+        patch_folder = os.path.join(
+            draping_res_folder, f"patches_{pings_per_patch}pings_{beams_per_patch}beams/{f}"
+        )
+        os.makedirs(patch_folder, exist_ok=True)
+        num_patches = 0
+        num_pings, num_beams, _ = current_data.shape
+        for i in tqdm(range(0, num_pings, pings_per_patch)):
+            for j in range(0, num_beams, beams_per_patch):
+                patch = current_data[i : i + pings_per_patch, j : j + beams_per_patch]
+                valid_mask = ~np.ma.masked_less_equal(patch[:, :, 2], 0).mask
+                np.savez(
+                    os.path.join(patch_folder, f"patch_{num_patches}.npz"),
+                    data=patch,
+                    valid_mask=valid_mask,
+                )
+                num_patches += 1
+        print(f"From {f}: Created {num_patches} patches.")
+        total_num_patches += num_patches
+    print(f"Total number of patches: {total_num_patches}")
+    return total_num_patches
 
 
 def parse_args():
